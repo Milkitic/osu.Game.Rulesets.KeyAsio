@@ -17,6 +17,9 @@ internal sealed class KeyAsioLazerState
     public KeyAsioLazerStatistics Statistics { get; init; } = new();
     public int HitErrorIndex { get; init; }
     public int[] HitErrors { get; init; } = [];
+    public KeyAsioLazerSkinInfo[]? SkinInfos { get; init; }
+    public string? UserDataDirectory { get; init; }
+    public string? ExeDirectory { get; init; }
 }
 
 internal enum KeyAsioLazerFieldKind : byte
@@ -34,6 +37,9 @@ internal enum KeyAsioLazerFieldKind : byte
     BeatmapFiles = 11,
     Statistics = 12,
     HitErrors = 13,
+    SkinInfos = 14,
+    UserDataDirectory = 15,
+    ExeDirectory = 16,
 }
 
 [Flags]
@@ -53,10 +59,13 @@ internal enum KeyAsioLazerFieldMask
     BeatmapFiles = 1 << 10,
     Statistics = 1 << 11,
     HitErrors = 1 << 12,
+    SkinInfos = 1 << 13,
+    UserDataDirectory = 1 << 14,
+    ExeDirectory = 1 << 15,
 
     Timing = ProcessId | PlayTime,
     Events = ProcessId | Status | Mods | Combo | Score | IsReplay | Username | BeatmapFolder | BeatmapFilename |
-             BeatmapFiles | Statistics | HitErrors,
+             BeatmapFiles | Statistics | HitErrors | SkinInfos | UserDataDirectory | ExeDirectory,
     All = Timing | Events,
 }
 
@@ -98,6 +107,12 @@ internal sealed partial class KeyAsioLazerDeltaFrame
                 fields.Add(KeyAsioLazerDeltaField.ForStatistics(current.Statistics));
             if (fieldMask.HasFlag(KeyAsioLazerFieldMask.HitErrors))
                 fields.Add(KeyAsioLazerDeltaField.ForHitErrors(current.HitErrorIndex, current.HitErrors));
+            if (fieldMask.HasFlag(KeyAsioLazerFieldMask.SkinInfos) && current.SkinInfos != null)
+                fields.Add(KeyAsioLazerDeltaField.ForSkinInfos(current.SkinInfos));
+            if (fieldMask.HasFlag(KeyAsioLazerFieldMask.UserDataDirectory) && current.UserDataDirectory != null)
+                fields.Add(KeyAsioLazerDeltaField.ForString(KeyAsioLazerFieldKind.UserDataDirectory, current.UserDataDirectory));
+            if (fieldMask.HasFlag(KeyAsioLazerFieldMask.ExeDirectory) && current.ExeDirectory != null)
+                fields.Add(KeyAsioLazerDeltaField.ForString(KeyAsioLazerFieldKind.ExeDirectory, current.ExeDirectory));
 
             return new KeyAsioLazerDeltaFrame { Fields = fields.ToArray() };
         }
@@ -132,6 +147,15 @@ internal sealed partial class KeyAsioLazerDeltaFrame
             (previous.HitErrorIndex != current.HitErrorIndex ||
              !previous.HitErrors.AsSpan().SequenceEqual(current.HitErrors)))
             fields.Add(KeyAsioLazerDeltaField.ForHitErrors(current.HitErrorIndex, current.HitErrors));
+        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.SkinInfos) &&
+            !SkinInfosEqual(previous.SkinInfos, current.SkinInfos) && current.SkinInfos != null)
+            fields.Add(KeyAsioLazerDeltaField.ForSkinInfos(current.SkinInfos));
+        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.UserDataDirectory) && previous.UserDataDirectory != current.UserDataDirectory
+            && current.UserDataDirectory != null)
+            fields.Add(KeyAsioLazerDeltaField.ForString(KeyAsioLazerFieldKind.UserDataDirectory, current.UserDataDirectory));
+        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.ExeDirectory) && previous.ExeDirectory != current.ExeDirectory
+            && current.ExeDirectory != null)
+            fields.Add(KeyAsioLazerDeltaField.ForString(KeyAsioLazerFieldKind.ExeDirectory, current.ExeDirectory));
 
         return new KeyAsioLazerDeltaFrame { Fields = fields.ToArray() };
     }
@@ -157,6 +181,29 @@ internal sealed partial class KeyAsioLazerDeltaFrame
 
         return true;
     }
+
+    private static bool SkinInfosEqual(KeyAsioLazerSkinInfo[]? left, KeyAsioLazerSkinInfo[]? right)
+    {
+        if (ReferenceEquals(left, right)) return true;
+        if (left == null && right == null) return true;
+        if (left == null || right == null) return false;
+        if (left.Length != right.Length) return false;
+
+        for (var i = 0; i < left.Length; i++)
+        {
+            if (left[i].Id != right[i].Id ||
+                left[i].Name != right[i].Name ||
+                left[i].Creator != right[i].Creator ||
+                left[i].Protected != right[i].Protected ||
+                left[i].InstantiationInfo != right[i].InstantiationInfo)
+                return false;
+
+            if (!FilesEqual(left[i].Files, right[i].Files))
+                return false;
+        }
+
+        return true;
+    }
 }
 
 internal partial struct KeyAsioLazerDeltaField
@@ -169,6 +216,7 @@ internal partial struct KeyAsioLazerDeltaField
     public KeyAsioLazerFile[]? FilesValue { get; set; }
     public KeyAsioLazerStatistics StatisticsValue { get; set; }
     public int[]? IntArrayValue { get; set; }
+    public KeyAsioLazerSkinInfo[]? SkinInfosValue { get; set; }
 
     public static KeyAsioLazerDeltaField ForInt(KeyAsioLazerFieldKind kind, int value)
         => new() { Kind = kind, IntValue = value };
@@ -195,12 +243,25 @@ internal partial struct KeyAsioLazerDeltaField
             IntValue = index,
             IntArrayValue = values,
         };
+
+    public static KeyAsioLazerDeltaField ForSkinInfos(KeyAsioLazerSkinInfo[] value)
+        => new() { Kind = KeyAsioLazerFieldKind.SkinInfos, SkinInfosValue = value };
 }
 
 internal sealed partial class KeyAsioLazerFile
 {
     public string Name { get; set; } = string.Empty;
     public string Path { get; set; } = string.Empty;
+}
+
+internal sealed partial class KeyAsioLazerSkinInfo
+{
+    public string Id { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Creator { get; set; } = string.Empty;
+    public string InstantiationInfo { get; set; } = string.Empty;
+    public bool Protected { get; set; }
+    public KeyAsioLazerFile[] Files { get; set; } = [];
 }
 
 internal partial struct KeyAsioLazerStatistics

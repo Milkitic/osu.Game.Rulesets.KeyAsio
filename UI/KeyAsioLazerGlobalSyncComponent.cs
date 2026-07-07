@@ -9,6 +9,9 @@ using osu.Framework.Platform;
 using osu.Framework.Screens;
 using osu.Game.Beatmaps;
 using osu.Game.Configuration;
+using osu.Game.Database;
+using osu.Game.Extensions;
+using osu.Game.IO;
 using osu.Game.Online.API;
 using osu.Game.Overlays;
 using osu.Game.Overlays.Notifications;
@@ -24,6 +27,7 @@ using osu.Game.Screens.Menu;
 using osu.Game.Screens.Play;
 using osu.Game.Screens.Ranking;
 using osu.Game.Screens.Select;
+using osu.Game.Skinning;
 
 namespace osu.Game.Rulesets.KeyAsio.UI;
 
@@ -92,6 +96,14 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
     [Resolved(CanBeNull = true)]
     private INotificationOverlay? notifications { get; set; }
 
+    [Resolved(CanBeNull = true)]
+    private SkinManager? skinManager { get; set; }
+
+    private KeyAsioLazerSkinInfo[]? lastPublishedSkinInfos;
+    private string? lastPublishedUserDataDirectory;
+    private string? lastPublishedExeDirectory;
+    private int skinPublishCooldown;
+
     public KeyAsioLazerGlobalSyncComponent()
     {
         AlwaysPresent = true;
@@ -146,7 +158,7 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
         selectedMods.ValueChanged += OnSelectedModsChanged;
 
         StartBeatmapMap(workingBeatmap.Value);
-        PublishEventState(includeBeatmapFiles: false, includeHitErrors: false);
+        PublishEventState(includeBeatmapFiles: false, includeHitErrors: false, forceSkins: true);
         PublishTimingState();
     }
 
@@ -339,17 +351,20 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
     }
 
     private void PublishEventState(bool includeBeatmapFiles, bool includeHitErrors)
+        => PublishEventState(includeBeatmapFiles, includeHitErrors, forceSkins: false);
+
+    private void PublishEventState(bool includeBeatmapFiles, bool includeHitErrors, bool forceSkins)
     {
         if (!isActive)
             return;
 
-        var state = CreateState(includeBeatmapFiles, includeHitErrors);
+        var state = CreateState(includeBeatmapFiles, includeHitErrors, forceSkins);
         lastPublishedStatus = state.Status;
         lastPublishedUsername = state.Username;
         KeyAsioLazerIpcClient.Shared.PublishEvent(state);
     }
 
-    private KeyAsioLazerState CreateState(bool includeBeatmapFiles, bool includeHitErrors)
+    private KeyAsioLazerState CreateState(bool includeBeatmapFiles, bool includeHitErrors, bool forceSkins)
     {
         int hitErrorIndex;
         int[] hitErrors;
@@ -363,6 +378,28 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
             hitErrorIndex = lastHitEventIndex;
             hitErrors = [];
         }
+
+        var exeDirectory = GetCurrentExeDirectory();
+        var userDataDirectory = GetUserDataDirectory();
+
+        var skinInfos = (forceSkins || skinPublishCooldown <= 0)
+            ? CollectSkinInfos()
+            : lastPublishedSkinInfos;
+
+        if (skinInfos != lastPublishedSkinInfos)
+            lastPublishedSkinInfos = skinInfos;
+
+        if (userDataDirectory != lastPublishedUserDataDirectory)
+            lastPublishedUserDataDirectory = userDataDirectory;
+
+        if (exeDirectory != lastPublishedExeDirectory)
+            lastPublishedExeDirectory = exeDirectory;
+
+        // Re-publish skins periodically to capture user changes (new imports, edits, deletions).
+        if (skinPublishCooldown > 0)
+            skinPublishCooldown--;
+        else
+            skinPublishCooldown = 150; // ~5s at 30fps Update rate
 
         return new KeyAsioLazerState
         {
@@ -387,7 +424,10 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
                 Miss = GetStatistic(HitResult.Miss)
             },
             HitErrorIndex = hitErrorIndex,
-            HitErrors = hitErrors
+            HitErrors = hitErrors,
+            SkinInfos = skinInfos,
+            UserDataDirectory = userDataDirectory,
+            ExeDirectory = exeDirectory
         };
     }
 
@@ -461,6 +501,132 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
             username = api?.ProvidedUsername;
 
         return string.IsNullOrWhiteSpace(username) ? null : username;
+    }
+
+    private static string? GetCurrentExeDirectory()
+    {
+        try
+        {
+            using var proc = Process.GetCurrentProcess();
+            var fileName = proc.MainModule?.FileName;
+            if (string.IsNullOrEmpty(fileName))
+                return null;
+
+            var dir = Path.GetDirectoryName(fileName);
+            return string.IsNullOrEmpty(dir) ? null : dir;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private string? GetUserDataDirectory()
+    {
+        if (storage == null)
+            return null;
+
+        try
+        {
+            var fullPath = Path.GetFullPath(storage.GetFullPath(string.Empty));
+            return Directory.Exists(fullPath) ? fullPath : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static readonly Guid random_skin_id = new Guid("D39DFEFB-477C-4372-B1EA-2BCEA5FB8908");
+
+    private KeyAsioLazerSkinInfo[]? CollectSkinInfos()
+    {
+        if (skinManager == null)
+            return null;
+
+        try
+        {
+            var skins = skinManager.GetAllUsableSkins();
+            var result = new List<KeyAsioLazerSkinInfo>(skins.Count);
+
+            foreach (var live in skins)
+            {
+                if (live.ID == random_skin_id)
+                    continue;
+
+                KeyAsioLazerSkinInfo mapped = live.PerformRead(info =>
+                {
+                    var files = MapSkinFiles(info);
+                    return new KeyAsioLazerSkinInfo
+                    {
+                        Id = info.ID.ToString(),
+                        Name = info.Name ?? string.Empty,
+                        Creator = info.Creator ?? string.Empty,
+                        InstantiationInfo = info.InstantiationInfo ?? string.Empty,
+                        Protected = info.Protected,
+                        Files = files
+                    };
+                });
+
+                result.Add(mapped);
+            }
+
+            result.Sort(static (left, right) =>
+            {
+                var idComparison = string.Compare(left.Id, right.Id, StringComparison.Ordinal);
+                return idComparison != 0
+                    ? idComparison
+                    : string.Compare(left.Name, right.Name, StringComparison.Ordinal);
+            });
+
+            return result.ToArray();
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, "Failed to collect lazer skin infos for KeyASIO.");
+            return lastPublishedSkinInfos;
+        }
+    }
+
+    private KeyAsioLazerFile[] MapSkinFiles(SkinInfo skinInfo)
+    {
+        if (skinInfo.Files == null || skinInfo.Files.Count == 0 || storage == null)
+            return [];
+
+        var filesRoot = Path.GetFullPath(storage.GetStorageForDirectory("files").GetFullPath("."));
+        var list = new List<KeyAsioLazerFile>(skinInfo.Files.Count);
+
+        foreach (var usage in skinInfo.Files)
+        {
+            try
+            {
+                var storagePath = usage.File.GetStoragePath();
+                var absolutePath = Path.GetFullPath(Path.Combine(filesRoot, storagePath));
+
+                if (File.Exists(absolutePath))
+                {
+                    list.Add(new KeyAsioLazerFile
+                    {
+                        Name = usage.Filename,
+                        Path = absolutePath
+                    });
+                }
+            }
+            catch
+            {
+                // Ignore missing / inaccessible files.
+            }
+        }
+
+        list.Sort(static (left, right) =>
+        {
+            var nameComparison = string.Compare(left.Name, right.Name, StringComparison.Ordinal);
+            return nameComparison != 0
+                ? nameComparison
+                : string.Compare(left.Path, right.Path, StringComparison.Ordinal);
+        });
+
+        return list.ToArray();
     }
 
     private int GetStatistic(HitResult result)

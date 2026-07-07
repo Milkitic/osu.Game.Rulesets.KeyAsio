@@ -3,15 +3,17 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.IO.Pipes;
 using System.Text;
+using osu.Framework.Logging;
 
 namespace osu.Game.Rulesets.KeyAsio.Interop;
 
 internal sealed class KeyAsioLazerIpcClient
 {
-    public const int ProtocolVersion = 1;
+    public const int ProtocolVersion = 2;
 
     private const string timing_pipe_name = "KeyAsio.LazerBridge.v1";
     private const string event_pipe_name = "KeyAsio.LazerBridge.Events.v1";
+    private const int large_frame_log_threshold = 1024 * 1024;
 
     public static KeyAsioLazerIpcClient Shared { get; } = new();
 
@@ -193,19 +195,25 @@ internal sealed class KeyAsioLazerIpcClient
             var delta = KeyAsioLazerDeltaFrame.Create(lastSentState, state, fieldMask);
             if (delta.Fields.Length > 0)
             {
-                await WriteFrameAsync(stream, delta, lengthPrefix, payloadWriter, token);
+                await WriteFrameAsync(stream, delta, pipeName, lengthPrefix, payloadWriter, token);
             }
 
             return state;
         }
     }
 
-    private static async Task WriteFrameAsync(Stream stream, KeyAsioLazerDeltaFrame frame, byte[] lengthPrefix,
-        PooledBufferWriter payloadWriter, CancellationToken token)
+    private static async Task WriteFrameAsync(Stream stream, KeyAsioLazerDeltaFrame frame, string pipeName,
+        byte[] lengthPrefix, PooledBufferWriter payloadWriter, CancellationToken token)
     {
         payloadWriter.Clear();
         WriteFramePayload(payloadWriter, frame);
         BinaryPrimitives.WriteInt32LittleEndian(lengthPrefix, payloadWriter.WrittenCount);
+
+        if (payloadWriter.WrittenCount >= large_frame_log_threshold)
+        {
+            var fields = string.Join(", ", frame.Fields.Select(static field => field.Kind.ToString()));
+            Logger.Log($"KeyASIO lazer IPC large frame on {pipeName}: {payloadWriter.WrittenCount} bytes ({fields}).");
+        }
 
         await stream.WriteAsync(lengthPrefix.AsMemory(0, sizeof(int)), token);
         await stream.WriteAsync(payloadWriter.WrittenMemory, token);
@@ -241,6 +249,8 @@ internal sealed class KeyAsioLazerIpcClient
                 case KeyAsioLazerFieldKind.Username:
                 case KeyAsioLazerFieldKind.BeatmapFolder:
                 case KeyAsioLazerFieldKind.BeatmapFilename:
+                case KeyAsioLazerFieldKind.UserDataDirectory:
+                case KeyAsioLazerFieldKind.ExeDirectory:
                     WriteString(writer, field.StringValue);
                     break;
 
@@ -255,6 +265,10 @@ internal sealed class KeyAsioLazerIpcClient
                 case KeyAsioLazerFieldKind.HitErrors:
                     WriteInt32(writer, field.IntValue);
                     WriteInt32Array(writer, field.IntArrayValue);
+                    break;
+
+                case KeyAsioLazerFieldKind.SkinInfos:
+                    WriteSkinInfos(writer, field.SkinInfosValue);
                     break;
             }
         }
@@ -284,6 +298,26 @@ internal sealed class KeyAsioLazerIpcClient
         WriteInt32(writer, statistics.Ok);
         WriteInt32(writer, statistics.Meh);
         WriteInt32(writer, statistics.Miss);
+    }
+
+    private static void WriteSkinInfos(PooledBufferWriter writer, KeyAsioLazerSkinInfo[]? skinInfos)
+    {
+        if (skinInfos == null)
+        {
+            WriteInt32(writer, -1);
+            return;
+        }
+
+        WriteInt32(writer, skinInfos.Length);
+        foreach (var skinInfo in skinInfos)
+        {
+            WriteString(writer, skinInfo.Id);
+            WriteString(writer, skinInfo.Name);
+            WriteString(writer, skinInfo.Creator);
+            WriteString(writer, skinInfo.InstantiationInfo);
+            WriteByte(writer, skinInfo.Protected ? (byte)1 : (byte)0);
+            WriteFiles(writer, skinInfo.Files);
+        }
     }
 
     private static void WriteInt32Array(PooledBufferWriter writer, int[]? values)
