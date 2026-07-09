@@ -2,26 +2,22 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.IO.Pipes;
-using System.Text;
+using KeyAsio.LazerProtocol;
 using osu.Framework.Logging;
 
 namespace osu.Game.Rulesets.KeyAsio.Interop;
 
 internal sealed class KeyAsioLazerIpcClient
 {
-    public const int ProtocolVersion = 2;
-
-    private const string timing_pipe_name = "KeyAsio.LazerBridge.v1";
-    private const string event_pipe_name = "KeyAsio.LazerBridge.Events.v1";
     private const int large_frame_log_threshold = 1024 * 1024;
 
     public static KeyAsioLazerIpcClient Shared { get; } = new();
 
     private readonly PipePublisher timingPublisher =
-        new(timing_pipe_name, KeyAsioLazerFieldMask.Timing, preserveEveryFrame: false);
+        new(LazerProtocolConstants.TimingPipeName, LazerFieldMask.Timing, preserveEveryFrame: false);
 
     private readonly PipePublisher eventPublisher =
-        new(event_pipe_name, KeyAsioLazerFieldMask.Events, preserveEveryFrame: true);
+        new(LazerProtocolConstants.EventPipeName, LazerFieldMask.Events, preserveEveryFrame: true);
 
     private KeyAsioLazerIpcClient()
     {
@@ -42,7 +38,7 @@ internal sealed class KeyAsioLazerIpcClient
         private const int max_queued_states = 256;
 
         private readonly string pipeName;
-        private readonly KeyAsioLazerFieldMask fieldMask;
+        private readonly LazerFieldMask fieldMask;
         private readonly ConcurrentQueue<KeyAsioLazerState>? queuedStates;
         private readonly object startupLock = new();
 
@@ -52,7 +48,7 @@ internal sealed class KeyAsioLazerIpcClient
         private int queuedStateCount;
         private long sequence;
 
-        public PipePublisher(string pipeName, KeyAsioLazerFieldMask fieldMask, bool preserveEveryFrame)
+        public PipePublisher(string pipeName, LazerFieldMask fieldMask, bool preserveEveryFrame)
         {
             this.pipeName = pipeName;
             this.fieldMask = fieldMask;
@@ -192,7 +188,7 @@ internal sealed class KeyAsioLazerIpcClient
             KeyAsioLazerState? lastSentState, byte[] lengthPrefix, PooledBufferWriter payloadWriter,
             CancellationToken token)
         {
-            var delta = KeyAsioLazerDeltaFrame.Create(lastSentState, state, fieldMask);
+            var delta = KeyAsioLazerDeltaBuilder.Create(lastSentState, state, fieldMask);
             if (delta.Fields.Length > 0)
             {
                 await WriteFrameAsync(stream, delta, pipeName, lengthPrefix, payloadWriter, token);
@@ -202,11 +198,11 @@ internal sealed class KeyAsioLazerIpcClient
         }
     }
 
-    private static async Task WriteFrameAsync(Stream stream, KeyAsioLazerDeltaFrame frame, string pipeName,
+    private static async Task WriteFrameAsync(Stream stream, LazerDeltaFrame frame, string pipeName,
         byte[] lengthPrefix, PooledBufferWriter payloadWriter, CancellationToken token)
     {
         payloadWriter.Clear();
-        WriteFramePayload(payloadWriter, frame);
+        frame.Write(payloadWriter);
         BinaryPrimitives.WriteInt32LittleEndian(lengthPrefix, payloadWriter.WrittenCount);
 
         if (payloadWriter.WrittenCount >= large_frame_log_threshold)
@@ -218,157 +214,6 @@ internal sealed class KeyAsioLazerIpcClient
         await stream.WriteAsync(lengthPrefix.AsMemory(0, sizeof(int)), token);
         await stream.WriteAsync(payloadWriter.WrittenMemory, token);
         await stream.FlushAsync(token);
-    }
-
-    private static void WriteFramePayload(PooledBufferWriter writer, KeyAsioLazerDeltaFrame frame)
-    {
-        WriteInt32(writer, frame.Version);
-        WriteInt32(writer, frame.Fields.Length);
-
-        foreach (var field in frame.Fields)
-        {
-            WriteByte(writer, (byte)field.Kind);
-            switch (field.Kind)
-            {
-                case KeyAsioLazerFieldKind.ProcessId:
-                case KeyAsioLazerFieldKind.Status:
-                case KeyAsioLazerFieldKind.PlayTime:
-                case KeyAsioLazerFieldKind.Combo:
-                case KeyAsioLazerFieldKind.Score:
-                    WriteInt32(writer, field.IntValue);
-                    break;
-
-                case KeyAsioLazerFieldKind.Mods:
-                    WriteUInt32(writer, field.UIntValue);
-                    break;
-
-                case KeyAsioLazerFieldKind.IsReplay:
-                    WriteByte(writer, field.BoolValue ? (byte)1 : (byte)0);
-                    break;
-
-                case KeyAsioLazerFieldKind.Username:
-                case KeyAsioLazerFieldKind.BeatmapFolder:
-                case KeyAsioLazerFieldKind.BeatmapFilename:
-                case KeyAsioLazerFieldKind.UserDataDirectory:
-                case KeyAsioLazerFieldKind.ExeDirectory:
-                    WriteString(writer, field.StringValue);
-                    break;
-
-                case KeyAsioLazerFieldKind.BeatmapFiles:
-                    WriteFiles(writer, field.FilesValue);
-                    break;
-
-                case KeyAsioLazerFieldKind.Statistics:
-                    WriteStatistics(writer, field.StatisticsValue);
-                    break;
-
-                case KeyAsioLazerFieldKind.HitErrors:
-                    WriteInt32(writer, field.IntValue);
-                    WriteInt32Array(writer, field.IntArrayValue);
-                    break;
-
-                case KeyAsioLazerFieldKind.SkinInfos:
-                    WriteSkinInfos(writer, field.SkinInfosValue);
-                    break;
-            }
-        }
-    }
-
-    private static void WriteFiles(PooledBufferWriter writer, KeyAsioLazerFile[]? files)
-    {
-        if (files == null)
-        {
-            WriteInt32(writer, -1);
-            return;
-        }
-
-        WriteInt32(writer, files.Length);
-        foreach (var file in files)
-        {
-            WriteString(writer, file.Name);
-            WriteString(writer, file.Path);
-        }
-    }
-
-    private static void WriteStatistics(PooledBufferWriter writer, KeyAsioLazerStatistics statistics)
-    {
-        WriteInt32(writer, statistics.Perfect);
-        WriteInt32(writer, statistics.Great);
-        WriteInt32(writer, statistics.Good);
-        WriteInt32(writer, statistics.Ok);
-        WriteInt32(writer, statistics.Meh);
-        WriteInt32(writer, statistics.Miss);
-    }
-
-    private static void WriteSkinInfos(PooledBufferWriter writer, KeyAsioLazerSkinInfo[]? skinInfos)
-    {
-        if (skinInfos == null)
-        {
-            WriteInt32(writer, -1);
-            return;
-        }
-
-        WriteInt32(writer, skinInfos.Length);
-        foreach (var skinInfo in skinInfos)
-        {
-            WriteString(writer, skinInfo.Id);
-            WriteString(writer, skinInfo.Name);
-            WriteString(writer, skinInfo.Creator);
-            WriteString(writer, skinInfo.InstantiationInfo);
-            WriteByte(writer, skinInfo.Protected ? (byte)1 : (byte)0);
-            WriteFiles(writer, skinInfo.Files);
-        }
-    }
-
-    private static void WriteInt32Array(PooledBufferWriter writer, int[]? values)
-    {
-        if (values == null)
-        {
-            WriteInt32(writer, -1);
-            return;
-        }
-
-        WriteInt32(writer, values.Length);
-        foreach (var value in values)
-        {
-            WriteInt32(writer, value);
-        }
-    }
-
-    private static void WriteString(PooledBufferWriter writer, string? value)
-    {
-        if (value == null)
-        {
-            WriteInt32(writer, -1);
-            return;
-        }
-
-        var byteCount = Encoding.UTF8.GetByteCount(value);
-        WriteInt32(writer, byteCount);
-        var span = writer.GetSpan(byteCount);
-        var written = Encoding.UTF8.GetBytes(value, span);
-        writer.Advance(written);
-    }
-
-    private static void WriteByte(PooledBufferWriter writer, byte value)
-    {
-        var span = writer.GetSpan(sizeof(byte));
-        span[0] = value;
-        writer.Advance(sizeof(byte));
-    }
-
-    private static void WriteInt32(PooledBufferWriter writer, int value)
-    {
-        var span = writer.GetSpan(sizeof(int));
-        BinaryPrimitives.WriteInt32LittleEndian(span, value);
-        writer.Advance(sizeof(int));
-    }
-
-    private static void WriteUInt32(PooledBufferWriter writer, uint value)
-    {
-        var span = writer.GetSpan(sizeof(uint));
-        BinaryPrimitives.WriteUInt32LittleEndian(span, value);
-        writer.Advance(sizeof(uint));
     }
 
     private static async Task DelayBeforeReconnect(CancellationToken token)

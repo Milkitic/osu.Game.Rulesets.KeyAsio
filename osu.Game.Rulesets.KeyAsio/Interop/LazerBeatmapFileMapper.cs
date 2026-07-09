@@ -1,3 +1,4 @@
+using KeyAsio.LazerProtocol;
 using osu.Game.Beatmaps;
 using osu.Game.Extensions;
 using osu.Framework.Platform;
@@ -20,7 +21,7 @@ internal static class LazerBeatmapFileMapper
 
         var fileStorage = storage.GetStorageForDirectory("files");
         var root = Path.GetFullPath(fileStorage.GetFullPath("."));
-        var files = new List<KeyAsioLazerFile>();
+        var files = new List<LazerFile>();
 
         foreach (var file in workingBeatmap.BeatmapSetInfo.Files)
         {
@@ -32,7 +33,7 @@ internal static class LazerBeatmapFileMapper
                 continue;
             }
 
-            files.Add(new KeyAsioLazerFile
+            files.Add(new LazerFile
             {
                 Name = NormalizeName(file.Filename),
                 Path = Path.GetFullPath(absolutePath)
@@ -49,4 +50,4 @@ internal static class LazerBeatmapFileMapper
         => name.Replace('\\', '/').TrimStart('/');
 }
 
-internal sealed record MappedBeatmap(string RootPath, string Filename, KeyAsioLazerFile[] Files);
+internal sealed record MappedBeatmap(string RootPath, string Filename, LazerFile[] Files);

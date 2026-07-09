@@ -8,7 +8,19 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="ppy.osu.Game" Version="2026.621.0" />
+    <PackageReference Include="ILRepack.Lib.MSBuild.Task" Version="2.0.45">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
   </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\KeyAsio.LazerProtocol\KeyAsio.LazerProtocol.csproj" />
+  </ItemGroup>
+
 </Project>

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using KeyAsio.LazerProtocol;
 using osu.Framework.Allocation;
 using osu.Framework.Bindables;
 using osu.Framework.Graphics;
@@ -100,7 +101,7 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
     [Resolved(CanBeNull = true)]
     private SkinManager? skinManager { get; set; }
 
-    private KeyAsioLazerSkinInfo[]? lastPublishedSkinInfos;
+    private LazerSkinInfo[]? lastPublishedSkinInfos;
     private string? lastPublishedUserDataDirectory;
     private string? lastPublishedExeDirectory;
     private int skinPublishCooldown;
@@ -434,7 +435,7 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
             BeatmapFolder = mappedBeatmap?.RootPath,
             BeatmapFilename = mappedBeatmap?.Filename,
             BeatmapFiles = includeBeatmapFiles && mappedBeatmap != null ? mappedBeatmap.Files : [],
-            Statistics = new KeyAsioLazerStatistics
+            Statistics = new LazerStatistics
             {
                 Perfect = GetStatistic(HitResult.Perfect),
                 Great = GetStatistic(HitResult.Great),
@@ -576,7 +577,7 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
     // Excluded from the published skin list since it is not a real selectable skin.
     private static readonly Guid LAZER_RANDOM_SKIN_ID = new Guid("D39DFEFB-477C-4372-B1EA-2BCEA5FB8908");
 
-    private KeyAsioLazerSkinInfo[]? CollectSkinInfos()
+    private LazerSkinInfo[]? CollectSkinInfos()
     {
         if (skinManager == null)
             return null;
@@ -584,17 +585,17 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
         try
         {
             var skins = skinManager.GetAllUsableSkins();
-            var result = new List<KeyAsioLazerSkinInfo>(skins.Count);
+            var result = new List<LazerSkinInfo>(skins.Count);
 
             foreach (var live in skins)
             {
                 if (live.ID == LAZER_RANDOM_SKIN_ID)
                     continue;
 
-                KeyAsioLazerSkinInfo mapped = live.PerformRead(info =>
+                LazerSkinInfo mapped = live.PerformRead(info =>
                 {
                     var files = MapSkinFiles(info);
-                    return new KeyAsioLazerSkinInfo
+                    return new LazerSkinInfo
                     {
                         Id = info.ID.ToString(),
                         Name = info.Name ?? string.Empty,
@@ -625,13 +626,13 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
         }
     }
 
-    private KeyAsioLazerFile[] MapSkinFiles(SkinInfo skinInfo)
+    private LazerFile[] MapSkinFiles(SkinInfo skinInfo)
     {
         if (skinInfo.Files == null || skinInfo.Files.Count == 0 || storage == null)
             return [];
 
         var filesRoot = Path.GetFullPath(storage.GetStorageForDirectory("files").GetFullPath("."));
-        var list = new List<KeyAsioLazerFile>(skinInfo.Files.Count);
+        var list = new List<LazerFile>(skinInfo.Files.Count);
 
         foreach (var usage in skinInfo.Files)
         {
@@ -642,7 +643,7 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
 
                 if (File.Exists(absolutePath))
                 {
-                    list.Add(new KeyAsioLazerFile
+                    list.Add(new LazerFile
                     {
                         Name = usage.Filename,
                         Path = absolutePath
