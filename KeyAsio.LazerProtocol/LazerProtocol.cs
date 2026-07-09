@@ -48,6 +48,7 @@ public enum LazerFieldMask
     ExeDirectory = 1 << 15,
 
     Timing = ProcessId | PlayTime,
+
     Events = ProcessId | Status | Mods | Combo | Score | IsReplay | Username | BeatmapFolder | BeatmapFilename |
              BeatmapFiles | Statistics | HitErrors | SkinInfos | UserDataDirectory | ExeDirectory,
     All = Timing | Events,

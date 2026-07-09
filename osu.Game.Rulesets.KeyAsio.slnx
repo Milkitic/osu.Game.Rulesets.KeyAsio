@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="KeyAsio.LazerProtocol/KeyAsio.LazerProtocol.csproj" />
+  <Project Path="osu.Game.Rulesets.KeyAsio/osu.Game.Rulesets.KeyAsio.csproj" />
+</Solution>
