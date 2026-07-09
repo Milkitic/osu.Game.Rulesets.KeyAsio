@@ -40,6 +40,7 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
     private const int status_results = 7;
     private const int status_beatmap_processing = 19;
     private const double timing_publish_interval = 2;
+    private const int skin_publish_cooldown_frames = 150; // ~5s at 30fps Update rate
 
     private static readonly int s_processId = Process.GetCurrentProcess().Id;
     private static readonly PropertyInfo? s_playerScoreProcessorProperty =
@@ -139,7 +140,7 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
         var currentUsername = GetUsername();
 
         if (currentStatus != lastPublishedStatus || currentUsername != lastPublishedUsername)
-            PublishEventState(includeBeatmapFiles: false, includeHitErrors: false);
+            PublishEventState();
     }
 
     private void TryActivate()
@@ -158,7 +159,7 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
         selectedMods.ValueChanged += OnSelectedModsChanged;
 
         StartBeatmapMap(workingBeatmap.Value);
-        PublishEventState(includeBeatmapFiles: false, includeHitErrors: false, forceSkins: true);
+        PublishEventState(PublishOptions.ForceSkins);
         PublishTimingState();
     }
 
@@ -166,13 +167,13 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
     {
         lastHitEventIndex = 0;
         StartBeatmapMap(beatmap.NewValue);
-        PublishEventState(includeBeatmapFiles: false, includeHitErrors: false);
+        PublishEventState();
         PublishTimingState();
     }
 
-    private void OnRulesetChanged(ValueChangedEvent<RulesetInfo> _) => PublishEventState(includeBeatmapFiles: false, includeHitErrors: false);
+    private void OnRulesetChanged(ValueChangedEvent<RulesetInfo> _) => PublishEventState();
 
-    private void OnSelectedModsChanged(ValueChangedEvent<IReadOnlyList<Mod>> _) => PublishEventState(includeBeatmapFiles: false, includeHitErrors: false);
+    private void OnSelectedModsChanged(ValueChangedEvent<IReadOnlyList<Mod>> _) => PublishEventState();
 
     private void StartBeatmapMap(WorkingBeatmap beatmap)
     {
@@ -200,7 +201,7 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
         if (completedTask.IsCompletedSuccessfully)
         {
             mappedBeatmap = completedTask.Result;
-            PublishEventState(includeBeatmapFiles: mappedBeatmap != null, includeHitErrors: false);
+            PublishEventState(mappedBeatmap != null ? PublishOptions.BeatmapFiles : PublishOptions.None);
             PublishTimingState();
         }
         else if (!completedTask.IsCanceled && completedTask.Exception != null)
@@ -255,7 +256,7 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
         }
 
         if (changed)
-            PublishEventState(includeBeatmapFiles: false, includeHitErrors: false);
+            PublishEventState();
     }
 
     private void UnbindScoreProcessor()
@@ -278,18 +279,18 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
         boundDrawableRuleset = null;
     }
 
-    private void OnNewJudgement(JudgementResult _) => PublishEventState(includeBeatmapFiles: false, includeHitErrors: true);
+    private void OnNewJudgement(JudgementResult _) => PublishEventState(PublishOptions.HitErrors);
 
-    private void OnJudgementReverted(JudgementResult _) => PublishEventState(includeBeatmapFiles: false, includeHitErrors: true);
+    private void OnJudgementReverted(JudgementResult _) => PublishEventState(PublishOptions.HitErrors);
 
     private void OnScoreResetFromReplayFrame()
     {
         lastHitEventIndex = 0;
-        PublishEventState(includeBeatmapFiles: false, includeHitErrors: true);
+        PublishEventState(PublishOptions.HitErrors);
         PublishTimingState();
     }
 
-    private void OnReplayLoadedChanged(ValueChangedEvent<bool> _) => PublishEventState(includeBeatmapFiles: false, includeHitErrors: false);
+    private void OnReplayLoadedChanged(ValueChangedEvent<bool> _) => PublishEventState();
 
     private void ApplyKeyAsioSongSelectRestrictions()
     {
@@ -350,26 +351,31 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
         });
     }
 
-    private void PublishEventState(bool includeBeatmapFiles, bool includeHitErrors)
-        => PublishEventState(includeBeatmapFiles, includeHitErrors, forceSkins: false);
-
-    private void PublishEventState(bool includeBeatmapFiles, bool includeHitErrors, bool forceSkins)
+    private void PublishEventState(PublishOptions options = PublishOptions.None)
     {
         if (!isActive)
             return;
 
-        var state = CreateState(includeBeatmapFiles, includeHitErrors, forceSkins);
+        var state = CreateState(options);
         lastPublishedStatus = state.Status;
         lastPublishedUsername = state.Username;
         KeyAsioLazerIpcClient.Shared.PublishEvent(state);
+
+        // Re-publish skins periodically to capture user changes (new imports, edits, deletions).
+        // Cooldown advances after state creation so that CreateState sees the
+        // expired (<=0) value on the same frame it re-collects skins.
+        if (skinPublishCooldown > 0)
+            skinPublishCooldown--;
+        else
+            skinPublishCooldown = skin_publish_cooldown_frames;
     }
 
-    private KeyAsioLazerState CreateState(bool includeBeatmapFiles, bool includeHitErrors, bool forceSkins)
+    private KeyAsioLazerState CreateState(PublishOptions options)
     {
         int hitErrorIndex;
         int[] hitErrors;
 
-        if (includeHitErrors)
+        if (options.HasFlag(PublishOptions.HitErrors))
         {
             hitErrors = CollectHitErrors(out hitErrorIndex);
         }
@@ -382,6 +388,7 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
         var exeDirectory = GetCurrentExeDirectory();
         var userDataDirectory = GetUserDataDirectory();
 
+        var forceSkins = options.HasFlag(PublishOptions.ForceSkins);
         var skinInfos = (forceSkins || skinPublishCooldown <= 0)
             ? CollectSkinInfos()
             : lastPublishedSkinInfos;
@@ -395,11 +402,7 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
         if (exeDirectory != lastPublishedExeDirectory)
             lastPublishedExeDirectory = exeDirectory;
 
-        // Re-publish skins periodically to capture user changes (new imports, edits, deletions).
-        if (skinPublishCooldown > 0)
-            skinPublishCooldown--;
-        else
-            skinPublishCooldown = 150; // ~5s at 30fps Update rate
+        var includeBeatmapFiles = options.HasFlag(PublishOptions.BeatmapFiles);
 
         return new KeyAsioLazerState
         {
@@ -449,11 +452,8 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
     {
         var current = osuGame?.ScreenStack?.CurrentScreen;
 
-        for (var i = 0; i < 8; i++)
+        while (current is IHasSubScreenStack subScreenStack)
         {
-            if (current is not IHasSubScreenStack subScreenStack)
-                break;
-
             var nested = subScreenStack.SubScreenStack.CurrentScreen;
             if (nested == null || ReferenceEquals(nested, current))
                 break;
@@ -488,8 +488,9 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
                 ? 0
                 : unchecked((uint)currentRuleset.ConvertToLegacyMods(selectedMods?.Value?.ToArray() ?? []));
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.Log($"Failed to convert mods to legacy mods: {ex.Message}", level: LogLevel.Debug);
             return 0;
         }
     }
@@ -537,7 +538,9 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
         }
     }
 
-    private static readonly Guid random_skin_id = new Guid("D39DFEFB-477C-4372-B1EA-2BCEA5FB8908");
+    // lazer's built-in "random skin" virtual entry (SkinInfo.RANDOM_SKIN in osu.Game).
+    // Excluded from the published skin list since it is not a real selectable skin.
+    private static readonly Guid LAZER_RANDOM_SKIN_ID = new Guid("D39DFEFB-477C-4372-B1EA-2BCEA5FB8908");
 
     private KeyAsioLazerSkinInfo[]? CollectSkinInfos()
     {
@@ -551,7 +554,7 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
 
             foreach (var live in skins)
             {
-                if (live.ID == random_skin_id)
+                if (live.ID == LAZER_RANDOM_SKIN_ID)
                     continue;
 
                 KeyAsioLazerSkinInfo mapped = live.PerformRead(info =>
@@ -668,12 +671,16 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
     private static T? GetPlayerProperty<T>(Player player, PropertyInfo? property)
         where T : class
     {
+        if (property == null)
+            return null;
+
         try
         {
-            return property?.GetValue(player) as T;
+            return property.GetValue(player) as T;
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.Error(ex, $"Failed to read Player property '{property.Name}' via reflection.");
             return null;
         }
     }
@@ -710,4 +717,13 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
 
         base.Dispose(isDisposing);
     }
+}
+
+[Flags]
+internal enum PublishOptions
+{
+    None = 0,
+    BeatmapFiles = 1 << 0,
+    HitErrors = 1 << 1,
+    ForceSkins = 1 << 2,
 }
