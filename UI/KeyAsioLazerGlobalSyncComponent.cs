@@ -105,6 +105,18 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
     private string? lastPublishedExeDirectory;
     private int skinPublishCooldown;
 
+    // Cached across the component lifetime; the underlying values never change
+    // while the process is running and the storage root is fixed.
+    private string? cachedExeDirectory;
+    private bool exeDirectoryCached;
+    private string? cachedUserDataDirectory;
+    private bool userDataDirectoryCached;
+
+    // Ruleset instance cached to avoid CreateInstance() on every CreateState;
+    // invalidated when the bound RulesetInfo changes.
+    private Ruleset? cachedRuleset;
+    private RulesetInfo? cachedRulesetInfo;
+
     public KeyAsioLazerGlobalSyncComponent()
     {
         AlwaysPresent = true;
@@ -171,7 +183,12 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
         PublishTimingState();
     }
 
-    private void OnRulesetChanged(ValueChangedEvent<RulesetInfo> _) => PublishEventState();
+    private void OnRulesetChanged(ValueChangedEvent<RulesetInfo> _)
+    {
+        cachedRuleset = null;
+        cachedRulesetInfo = null;
+        PublishEventState();
+    }
 
     private void OnSelectedModsChanged(ValueChangedEvent<IReadOnlyList<Mod>> _) => PublishEventState();
 
@@ -483,10 +500,19 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
             if (boundDrawableRuleset != null)
                 return unchecked((uint)boundDrawableRuleset.Ruleset.ConvertToLegacyMods(boundDrawableRuleset.Mods.ToArray()));
 
-            var currentRuleset = ruleset?.Value?.CreateInstance();
-            return currentRuleset == null
+            var currentRulesetInfo = ruleset?.Value;
+            if (currentRulesetInfo == null)
+                return 0;
+
+            if (cachedRulesetInfo != currentRulesetInfo)
+            {
+                cachedRulesetInfo = currentRulesetInfo;
+                cachedRuleset = currentRulesetInfo.CreateInstance();
+            }
+
+            return cachedRuleset == null
                 ? 0
-                : unchecked((uint)currentRuleset.ConvertToLegacyMods(selectedMods?.Value?.ToArray() ?? []));
+                : unchecked((uint)cachedRuleset.ConvertToLegacyMods(selectedMods?.Value?.ToArray() ?? []));
         }
         catch (Exception ex)
         {
@@ -504,37 +530,45 @@ internal sealed partial class KeyAsioLazerGlobalSyncComponent : Component
         return string.IsNullOrWhiteSpace(username) ? null : username;
     }
 
-    private static string? GetCurrentExeDirectory()
+    private string? GetCurrentExeDirectory()
     {
+        if (exeDirectoryCached)
+            return cachedExeDirectory;
+
+        exeDirectoryCached = true;
         try
         {
             using var proc = Process.GetCurrentProcess();
             var fileName = proc.MainModule?.FileName;
             if (string.IsNullOrEmpty(fileName))
-                return null;
+                return cachedExeDirectory = null;
 
             var dir = Path.GetDirectoryName(fileName);
-            return string.IsNullOrEmpty(dir) ? null : dir;
+            return cachedExeDirectory = (string.IsNullOrEmpty(dir) ? null : dir);
         }
         catch
         {
-            return null;
+            return cachedExeDirectory = null;
         }
     }
 
     private string? GetUserDataDirectory()
     {
+        if (userDataDirectoryCached)
+            return cachedUserDataDirectory;
+
+        userDataDirectoryCached = true;
         if (storage == null)
-            return null;
+            return cachedUserDataDirectory = null;
 
         try
         {
             var fullPath = Path.GetFullPath(storage.GetFullPath(string.Empty));
-            return Directory.Exists(fullPath) ? fullPath : null;
+            return cachedUserDataDirectory = (Directory.Exists(fullPath) ? fullPath : null);
         }
         catch
         {
-            return null;
+            return cachedUserDataDirectory = null;
         }
     }
 
