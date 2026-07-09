@@ -77,84 +77,47 @@ internal sealed partial class KeyAsioLazerDeltaFrame
     public static KeyAsioLazerDeltaFrame Create(KeyAsioLazerState? previous, KeyAsioLazerState current,
         KeyAsioLazerFieldMask fieldMask = KeyAsioLazerFieldMask.All)
     {
+        var p = previous;
         var fields = new List<KeyAsioLazerDeltaField>(14);
 
-        if (previous == null)
-        {
-            if (fieldMask.HasFlag(KeyAsioLazerFieldMask.ProcessId))
-                fields.Add(KeyAsioLazerDeltaField.ForInt(KeyAsioLazerFieldKind.ProcessId, current.ProcessId));
-            if (fieldMask.HasFlag(KeyAsioLazerFieldMask.Status))
-                fields.Add(KeyAsioLazerDeltaField.ForInt(KeyAsioLazerFieldKind.Status, current.Status));
-            if (fieldMask.HasFlag(KeyAsioLazerFieldMask.PlayTime))
-                fields.Add(KeyAsioLazerDeltaField.ForInt(KeyAsioLazerFieldKind.PlayTime, current.PlayTime));
-            if (fieldMask.HasFlag(KeyAsioLazerFieldMask.Mods))
-                fields.Add(KeyAsioLazerDeltaField.ForUInt(KeyAsioLazerFieldKind.Mods, current.Mods));
-            if (fieldMask.HasFlag(KeyAsioLazerFieldMask.Combo))
-                fields.Add(KeyAsioLazerDeltaField.ForInt(KeyAsioLazerFieldKind.Combo, current.Combo));
-            if (fieldMask.HasFlag(KeyAsioLazerFieldMask.Score))
-                fields.Add(KeyAsioLazerDeltaField.ForInt(KeyAsioLazerFieldKind.Score, current.Score));
-            if (fieldMask.HasFlag(KeyAsioLazerFieldMask.IsReplay))
-                fields.Add(KeyAsioLazerDeltaField.ForBool(KeyAsioLazerFieldKind.IsReplay, current.IsReplay));
-            if (fieldMask.HasFlag(KeyAsioLazerFieldMask.Username))
-                fields.Add(KeyAsioLazerDeltaField.ForString(KeyAsioLazerFieldKind.Username, current.Username));
-            if (fieldMask.HasFlag(KeyAsioLazerFieldMask.BeatmapFolder))
-                fields.Add(KeyAsioLazerDeltaField.ForString(KeyAsioLazerFieldKind.BeatmapFolder, current.BeatmapFolder));
-            if (fieldMask.HasFlag(KeyAsioLazerFieldMask.BeatmapFilename))
-                fields.Add(KeyAsioLazerDeltaField.ForString(KeyAsioLazerFieldKind.BeatmapFilename, current.BeatmapFilename));
-            if (fieldMask.HasFlag(KeyAsioLazerFieldMask.BeatmapFiles) && current.BeatmapFiles.Length > 0)
-                fields.Add(KeyAsioLazerDeltaField.ForFiles(current.BeatmapFiles));
-            if (fieldMask.HasFlag(KeyAsioLazerFieldMask.Statistics))
-                fields.Add(KeyAsioLazerDeltaField.ForStatistics(current.Statistics));
-            if (fieldMask.HasFlag(KeyAsioLazerFieldMask.HitErrors))
-                fields.Add(KeyAsioLazerDeltaField.ForHitErrors(current.HitErrorIndex, current.HitErrors));
-            if (fieldMask.HasFlag(KeyAsioLazerFieldMask.SkinInfos) && current.SkinInfos != null)
-                fields.Add(KeyAsioLazerDeltaField.ForSkinInfos(current.SkinInfos));
-            if (fieldMask.HasFlag(KeyAsioLazerFieldMask.UserDataDirectory) && current.UserDataDirectory != null)
-                fields.Add(KeyAsioLazerDeltaField.ForString(KeyAsioLazerFieldKind.UserDataDirectory, current.UserDataDirectory));
-            if (fieldMask.HasFlag(KeyAsioLazerFieldMask.ExeDirectory) && current.ExeDirectory != null)
-                fields.Add(KeyAsioLazerDeltaField.ForString(KeyAsioLazerFieldKind.ExeDirectory, current.ExeDirectory));
-
-            return new KeyAsioLazerDeltaFrame { Fields = fields.ToArray() };
-        }
-
-        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.ProcessId) && previous.ProcessId != current.ProcessId)
+        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.ProcessId) && (p is null || p.ProcessId != current.ProcessId))
             fields.Add(KeyAsioLazerDeltaField.ForInt(KeyAsioLazerFieldKind.ProcessId, current.ProcessId));
-        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.Status) && previous.Status != current.Status)
+        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.Status) && (p is null || p.Status != current.Status))
             fields.Add(KeyAsioLazerDeltaField.ForInt(KeyAsioLazerFieldKind.Status, current.Status));
-        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.PlayTime) && previous.PlayTime != current.PlayTime)
+        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.PlayTime) && (p is null || p.PlayTime != current.PlayTime))
             fields.Add(KeyAsioLazerDeltaField.ForInt(KeyAsioLazerFieldKind.PlayTime, current.PlayTime));
-        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.Mods) && previous.Mods != current.Mods)
+        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.Mods) && (p is null || p.Mods != current.Mods))
             fields.Add(KeyAsioLazerDeltaField.ForUInt(KeyAsioLazerFieldKind.Mods, current.Mods));
-        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.Combo) && previous.Combo != current.Combo)
+        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.Combo) && (p is null || p.Combo != current.Combo))
             fields.Add(KeyAsioLazerDeltaField.ForInt(KeyAsioLazerFieldKind.Combo, current.Combo));
-        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.Score) && previous.Score != current.Score)
+        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.Score) && (p is null || p.Score != current.Score))
             fields.Add(KeyAsioLazerDeltaField.ForInt(KeyAsioLazerFieldKind.Score, current.Score));
-        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.IsReplay) && previous.IsReplay != current.IsReplay)
+        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.IsReplay) && (p is null || p.IsReplay != current.IsReplay))
             fields.Add(KeyAsioLazerDeltaField.ForBool(KeyAsioLazerFieldKind.IsReplay, current.IsReplay));
-        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.Username) && previous.Username != current.Username)
+        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.Username) && (p is null || p.Username != current.Username))
             fields.Add(KeyAsioLazerDeltaField.ForString(KeyAsioLazerFieldKind.Username, current.Username));
-        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.BeatmapFolder) && previous.BeatmapFolder != current.BeatmapFolder)
+        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.BeatmapFolder) && (p is null || p.BeatmapFolder != current.BeatmapFolder))
             fields.Add(KeyAsioLazerDeltaField.ForString(KeyAsioLazerFieldKind.BeatmapFolder, current.BeatmapFolder));
-        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.BeatmapFilename) && previous.BeatmapFilename != current.BeatmapFilename)
+        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.BeatmapFilename) && (p is null || p.BeatmapFilename != current.BeatmapFilename))
             fields.Add(KeyAsioLazerDeltaField.ForString(KeyAsioLazerFieldKind.BeatmapFilename, current.BeatmapFilename));
         if (fieldMask.HasFlag(KeyAsioLazerFieldMask.BeatmapFiles) && current.BeatmapFiles.Length > 0 &&
-            !FilesEqual(previous.BeatmapFiles, current.BeatmapFiles))
+            (p is null || !FilesEqual(p.BeatmapFiles, current.BeatmapFiles)))
             fields.Add(KeyAsioLazerDeltaField.ForFiles(current.BeatmapFiles));
         if (fieldMask.HasFlag(KeyAsioLazerFieldMask.Statistics) &&
-            !StatisticsEqual(previous.Statistics, current.Statistics))
+            (p is null || !StatisticsEqual(p.Statistics, current.Statistics)))
             fields.Add(KeyAsioLazerDeltaField.ForStatistics(current.Statistics));
         if (fieldMask.HasFlag(KeyAsioLazerFieldMask.HitErrors) &&
-            (previous.HitErrorIndex != current.HitErrorIndex ||
-             !previous.HitErrors.AsSpan().SequenceEqual(current.HitErrors)))
+            (p is null || p.HitErrorIndex != current.HitErrorIndex ||
+             !p.HitErrors.AsSpan().SequenceEqual(current.HitErrors)))
             fields.Add(KeyAsioLazerDeltaField.ForHitErrors(current.HitErrorIndex, current.HitErrors));
-        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.SkinInfos) &&
-            !SkinInfosEqual(previous.SkinInfos, current.SkinInfos) && current.SkinInfos != null)
+        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.SkinInfos) && current.SkinInfos != null &&
+            (p is null || !SkinInfosEqual(p.SkinInfos, current.SkinInfos)))
             fields.Add(KeyAsioLazerDeltaField.ForSkinInfos(current.SkinInfos));
-        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.UserDataDirectory) && previous.UserDataDirectory != current.UserDataDirectory
-            && current.UserDataDirectory != null)
+        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.UserDataDirectory) && current.UserDataDirectory != null &&
+            (p is null || p.UserDataDirectory != current.UserDataDirectory))
             fields.Add(KeyAsioLazerDeltaField.ForString(KeyAsioLazerFieldKind.UserDataDirectory, current.UserDataDirectory));
-        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.ExeDirectory) && previous.ExeDirectory != current.ExeDirectory
-            && current.ExeDirectory != null)
+        if (fieldMask.HasFlag(KeyAsioLazerFieldMask.ExeDirectory) && current.ExeDirectory != null &&
+            (p is null || p.ExeDirectory != current.ExeDirectory))
             fields.Add(KeyAsioLazerDeltaField.ForString(KeyAsioLazerFieldKind.ExeDirectory, current.ExeDirectory));
 
         return new KeyAsioLazerDeltaFrame { Fields = fields.ToArray() };
