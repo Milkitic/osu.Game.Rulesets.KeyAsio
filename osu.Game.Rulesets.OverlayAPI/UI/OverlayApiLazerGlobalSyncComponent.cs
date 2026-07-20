@@ -517,6 +517,12 @@ internal sealed partial class OverlayApiLazerGlobalSyncComponent : Component
             {
                 var collected = CollectSkinInfos();
                 Volatile.Write(ref lastPublishedSkinInfos, collected);
+
+                // The initial event state is published before this background collection finishes,
+                // so it contains no skin context. Publish again on the update thread once the data
+                // is ready; otherwise a client can remain connected indefinitely without ever
+                // receiving SkinInfos when no other event state changes.
+                Schedule(() => PublishEventState());
             }
             catch (Exception ex)
             {
