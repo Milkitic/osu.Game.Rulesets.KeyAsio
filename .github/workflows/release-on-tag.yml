@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to (re-)release'
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve tag
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          case "$TAG" in
+            v*-a | v*-a.[0-9]*) echo "is_manual=true" >> "$GITHUB_OUTPUT" ;;
+            *)                    echo "is_manual=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.meta.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Verify tag belongs to main
+        run: |
+          git fetch origin main:refs/remotes/origin/main
+          git merge-base --is-ancestor '${{ steps.meta.outputs.tag }}' origin/main || {
+            echo "::error::Only tags reachable from main can be released."
+            exit 1
+          }
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build and publish ${{ steps.meta.outputs.tag }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Use the publisher from main so old tags can also be rebuilt safely.
+        run: bash <(git show origin/main:.github/scripts/release-tag.sh) '${{ steps.meta.outputs.tag }}'
+
+      - name: Start lazer and tachyon synchronization
+        if: steps.meta.outputs.is_manual == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run sync-osu.yml --ref main

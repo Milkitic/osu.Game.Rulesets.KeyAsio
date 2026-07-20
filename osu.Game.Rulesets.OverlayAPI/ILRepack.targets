@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Target Name="ILRepacker" AfterTargets="Build">
+    <ItemGroup>
+      <InputAssemblies Include="$(OutputPath)osu.Game.Rulesets.OverlayAPI.dll" />
+      <InputAssemblies Include="$(OutputPath)OverlayAPI.LazerProtocol.dll" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <DoNotInternalizeAssemblies Include="OverlayAPI.LazerProtocol" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <LibraryPath Include="$(OutputPath)" />
+    </ItemGroup>
+
+    <ILRepack
+        Parallel="true"
+        Internalize="true"
+        InternalizeExclude="@(DoNotInternalizeAssemblies)"
+        InputAssemblies="@(InputAssemblies)"
+        LibraryPath="@(LibraryPath)"
+        TargetKind="Dll"
+        OutputFile="$(OutputPath)$(AssemblyName).dll"
+    />
+  </Target>
+</Project>

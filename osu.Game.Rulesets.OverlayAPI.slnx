@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="OverlayAPI.LazerProtocol/OverlayAPI.LazerProtocol.csproj" />
+  <Project Path="osu.Game.Rulesets.OverlayAPI/osu.Game.Rulesets.OverlayAPI.csproj" />
+</Solution>

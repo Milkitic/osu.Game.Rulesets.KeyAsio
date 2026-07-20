@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup Label="Project">
+    <TargetFramework>net8.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PpyOsuGameVersion>2026.702.1</PpyOsuGameVersion>
+
+    <Product>OverlayAPI</Product>
+    <Authors>Milkitic</Authors>
+    <Company>Milkitic</Company>
+    <Copyright>Copyright © Milkitic 2022~2026</Copyright>
+
+    <MinVerMinimumMajorMinor>0.0</MinVerMinimumMajorMinor>
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+  </PropertyGroup>
+
+  <!-- DifficultyCalculator changed signatures in the 2026.702.x package line. -->
+  <PropertyGroup Condition="$([MSBuild]::VersionLessThan('$(PpyOsuGameVersion)', '2026.702.0'))">
+    <DefineConstants>$(DefineConstants);OSU_LEGACY_DIFFICULTY_API</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MinVer" Version="7.0.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="ppy.osu.Game" Version="$(PpyOsuGameVersion)" />
+  </ItemGroup>
+ 
+  <ItemGroup Condition="'$(Configuration)' == 'Release'">
+    <PackageReference Include="ILRepack.Lib.MSBuild.Task" Version="2.0.45">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OverlayAPI.LazerProtocol\OverlayAPI.LazerProtocol.csproj" />
+  </ItemGroup>
+
+</Project>

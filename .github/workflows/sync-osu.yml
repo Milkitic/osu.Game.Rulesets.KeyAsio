@@ -1,0 +1,171 @@
+name: Sync osu! versions
+
+on:
+  schedule:
+    # GitHub may delay scheduled workflows under load. Avoid the busiest exact
+    # hour boundary; this is still a nominal 10-minute cadence.
+    - cron: '7,17,27,37,47,57 * * * *'
+  # An external scheduler may POST the `sync-osu` event for a stricter cadence.
+  repository_dispatch:
+    types: [sync-osu]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-osu
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    outputs:
+      release_tags: ${{ steps.release-tags.outputs.tags }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch latest ppy/osu releases
+        id: ppy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          HEADERS="$RUNNER_TEMP/ppy-osu-headers.txt"
+          RESPONSE="$(curl --fail --silent --show-error --retry 3 --retry-all-errors \
+            --connect-timeout 10 --max-time 60 \
+            -D "$HEADERS" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/ppy/osu/releases?per_page=100")"
+
+          # The ppy/osu lookup is one authenticated REST request. At most two
+          # additional release-existence checks run later (one per channel),
+          # so the normal 10-minute cadence uses no more than 18 REST calls/hour.
+          # Log the response quota for audit.
+          REMAINING="$(tr -d '\r' < "$HEADERS" | awk -F': ' 'tolower($1) == "x-ratelimit-remaining" { print $2 }' | tail -1)"
+          LIMIT="$(tr -d '\r' < "$HEADERS" | awk -F': ' 'tolower($1) == "x-ratelimit-limit" { print $2 }' | tail -1)"
+          echo "::notice::GitHub REST rate limit remaining: ${REMAINING:-unknown}/${LIMIT:-unknown}"
+          if [ -n "${REMAINING:-}" ] && [ "$REMAINING" -lt 10 ]; then
+            echo "::warning::GitHub REST quota is nearly exhausted; the next scheduled run will retry automatically."
+          fi
+
+          LAZER="$(jq -r '[.[] | select(.tag_name | endswith("-lazer"))] | max_by(.published_at) | .tag_name // empty' <<< "$RESPONSE")"
+          TACHYON="$(jq -r '[.[] | select(.tag_name | endswith("-tachyon"))] | max_by(.published_at) | .tag_name // empty' <<< "$RESPONSE")"
+          LAZER_BARE="${LAZER%-lazer}"
+          TACHYON_BARE="${TACHYON%-tachyon}"
+
+          [[ "$LAZER_BARE" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Could not find a valid lazer release."; exit 1; }
+          [[ "$TACHYON_BARE" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Could not find a valid tachyon release."; exit 1; }
+
+          # Select the newest stable numeric package that is <= the channel's
+          # osu! target. A newer package may target game APIs unavailable in an
+          # older client, so it must never be used as a compatibility fallback.
+          NUGET_RESPONSE="$(curl --fail --silent --show-error --retry 3 --retry-all-errors \
+            --connect-timeout 10 --max-time 60 --location \
+            "https://api.nuget.org/v3-flatcontainer/ppy.osu.game/index.json")"
+          NUGET_VERSIONS="$(jq -r '.versions[] | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))' <<< "$NUGET_RESPONSE" | sort -V)"
+          [[ -n "$NUGET_VERSIONS" ]] || {
+            echo "::error::NuGet returned no stable numeric ppy.osu.Game versions."
+            exit 1
+          }
+
+          select_nuget_version() {
+            local channel="$1" target="$2" version selected=""
+            while IFS= read -r version; do
+              [ -z "$version" ] && continue
+              if [ "$version" = "$target" ] || [ "$(printf '%s\n%s\n' "$version" "$target" | sort -V | head -1)" = "$version" ]; then
+                selected="$version"
+              else
+                break
+              fi
+            done <<< "$NUGET_VERSIONS"
+
+            if [ -z "$selected" ]; then
+              echo "::error::No ppy.osu.Game package <= $target is available for $channel." >&2
+              return 1
+            fi
+            if [ "$selected" != "$target" ]; then
+              echo "::warning::ppy.osu.Game $target for $channel is not published; using newest compatible NuGet $selected (<= $target)." >&2
+            fi
+            printf '%s' "$selected"
+          }
+
+          LAZER_NUGET="$(select_nuget_version lazer "$LAZER_BARE")"
+          TACHYON_NUGET="$(select_nuget_version tachyon "$TACHYON_BARE")"
+
+          echo "lazer_bare=$LAZER_BARE" >> "$GITHUB_OUTPUT"
+          echo "tachyon_bare=$TACHYON_BARE" >> "$GITHUB_OUTPUT"
+          echo "lazer_nuget=$LAZER_NUGET" >> "$GITHUB_OUTPUT"
+          echo "tachyon_nuget=$TACHYON_NUGET" >> "$GITHUB_OUTPUT"
+          echo "::notice::ppy/osu lazer latest: $LAZER"
+          echo "::notice::ppy/osu tachyon latest: $TACHYON"
+          echo "::notice::Selected ppy.osu.Game for lazer: ${LAZER_NUGET:-<waiting>}"
+          echo "::notice::Selected ppy.osu.Game for tachyon: ${TACHYON_NUGET:-<waiting>}"
+
+      - name: Sync lazer channel
+        id: lazer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/sync-channel.sh lazer '${{ steps.ppy.outputs.lazer_bare }}' '${{ steps.ppy.outputs.lazer_nuget }}'
+
+      - name: Sync tachyon channel
+        id: tachyon
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/sync-channel.sh tachyon '${{ steps.ppy.outputs.tachyon_bare }}' '${{ steps.ppy.outputs.tachyon_nuget }}'
+
+      - name: Collect tags that need a GitHub Release
+        id: release-tags
+        env:
+          LAZER_TAG: ${{ steps.lazer.outputs.release_tag }}
+          TACHYON_TAG: ${{ steps.tachyon.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          TAGS=()
+          [ -n "$LAZER_TAG" ] && TAGS+=("$LAZER_TAG")
+          [ -n "$TACHYON_TAG" ] && TAGS+=("$TACHYON_TAG")
+
+          if [ "${#TAGS[@]}" -eq 0 ]; then
+            echo 'tags=[]' >> "$GITHUB_OUTPUT"
+          else
+            printf 'tags=%s\n' "$(printf '%s\n' "${TAGS[@]}" | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
+          fi
+
+  release:
+    needs: sync
+    if: needs.sync.outputs.release_tags != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: ${{ fromJSON(needs.sync.outputs.release_tags) }}
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.tag }}
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Fetch release tooling from main
+        run: git fetch origin main:refs/remotes/origin/main
+
+      - name: Build and publish ${{ matrix.tag }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash <(git show origin/main:.github/scripts/release-tag.sh) '${{ matrix.tag }}'
