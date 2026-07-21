@@ -10,4 +10,4 @@ It is designed to be minimally invasive: it does not modify osu!'s behaviour or 
 
 However, it is not a complete, playable ruleset. **USE IT AT YOUR OWN RISK.**
 
-Once osu!'s official external integrations are ready ([See PR Here](https://github.com/ppy/osu/pull/37335)), this ruleset will be discontinued immediately.
+Once osu!'s official external integrations are ready for use ([See initial PR Here](https://github.com/ppy/osu/pull/37335)), this ruleset will be discontinued immediately.
